@@ -5,11 +5,13 @@ Welcome to the Exploratory Analysis of the Airbnb Dataset! In this project, I ai
 Spatial data analysis: 
 -	How location ratings change across the neighbourhoods?
 -	How is the Super Host distributed across the neighbourhoods?
+
 Price and supply analysis:
 -	What is the average price of Airbnb per year, and across all the years available?
 -	Is there a relationship between supply and price?
 -	Similarly, is there a relationship considering the different room types available?
 -	Is it possible to stay at a Super host for under $100 per night?
+
 Demand analysis: 
 -	What is the total demand for Airbnb per year, and across all the years available?
 -	Is there a relationship between supply, price, and demand?
