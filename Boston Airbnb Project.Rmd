@@ -1,0 +1,653 @@
+---
+title: "Airbnb Boston Exploratory Data Analysis and Visualization"
+author: "Tiago Santos"
+date: "9/11/2019"
+output: html_document
+---
+
+Introduction
+
+Airbnb is an online marketplace for arranging homestays, acting as a broker. The seller, known as a “host” posts a listing on Airbnb’s website with an offer, and customers make a selection from all the offers posted. This analysis is based on official data provided by Airbnb for the city of Boston from the years 2008 (the year in which Airbnb began operation) to 2019 (the current year).
+
+Objectives:
+
+There are 3 main areas I would like to study
+Spatial data analysis:
+- How location ratings change across the neighborhoods?
+- How is the Super Host distributed across the neighborhoods?
+Price and supply analysis:
+- What is the average price of Airbnb per year, and across all the years available?
+- Is there a relationship between supply and price?
+- Similarly, is there a relationship considering the different room types available?
+- The average price from new bookings over the months?
+- Is it possible to stay at a Super host for under $100 per night?
+Demand analysis:
+- What is the total demand for Airbnb per year, and across all the years available?
+- Is there a relationship between supply, price, and demand?
+- Are there any trends in the demand for Airbnb?
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+require(devtools)
+library(devtools)
+library(lubridate)
+library("csv")
+library(grid)
+library(tidyr)
+library(scales)
+library("ggmap")
+require(viridis)
+if(!requireNamespace("devtools")) install.packages("devtools")
+devtools::install_github("dkahle/ggmap", ref = "tidyup", force=TRUE)
+suppressWarnings(require(RColorBrewer))
+
+```
+
+Loading the data
+
+```{r}
+rm(list = ls())
+
+airbnbl <- read.csv("listings.csv",header=TRUE, stringsAsFactors=FALSE, na.strings=c(""))
+airbnbr <- read.csv("reviews.csv")
+airbnbc <- read.csv("calendar.csv")
+```
+
+```{r}
+dim(airbnbl)
+dim(airbnbr)
+dim(airbnbc)
+```
+
+Dataset information:
+
+The data is sourced from the "Inside Airbnb" website "http://insideairbnb.com/get-the-data.html"
+
+‘listings.csv’: This dataset has 6,247 rows of data, each with 106 attributes
+  - Key attributes used in this analysis include: ‘price’ (continuous), ‘Longitude’ (continuous),
+‘Latitude’ (continuous), ‘host_is_superhost’ (categorical), ‘neighbourhood_cleansed’
+(categorical), ‘review_scores_location’ (continuous), ‘host_id’ (continuous), ‘property_type’
+(categorical)
+
+‘reviews.csv’: This dataset detailed reviews given by the guests and it has 199,106 rows of data, each with 6 attributes
+  - Key attributes used in this analysis include: ‘listing_id’ (discrete), ‘date’ (datetime) and ‘id’ (discrete)
+  
+'calendar.csv': This dataset provides details about booking for the next year by listings and it has 2,280,115 rows of data, each with 7 attributes
+  - Key attributes used in this analysis include: ‘listing_id’ (discrete), ‘date’ (datetime) and ‘available’ (categorial), ‘price’ (continuous) and ‘adjusted_price’ (continuous)
+
+
+```{r}
+str(airbnbl)
+str(airbnbr)
+str(airbnbc)
+```
+
+```{r}
+head(airbnbl)
+head(airbnbr)
+head(airbnbc)
+
+```
+
+```{r}
+summary(airbnbl)
+summary(airbnbr)
+summary(airbnbc)
+```
+
+Analysing the summary airbnbr, we see that the min value in the date column is 2009 and max is 2019.
+we are interested in the number of reviews over the date range 2009-2018 the number of reviews inidicates the popularity of airbnb (demand)
+
+
+### Preparing the Data
+
+price (listings,calendar): The price column contained data in string format with the currency symbol ‘$’ and comma separator ‘,’ attached to it. This column was manipulated to contain double values for analysis.
+
+
+```{r}
+airbnbl$price <- gsub("\\$", "", airbnbl$price)
+airbnbl$price <-as.numeric(gsub(",","",airbnbl$price,fixed=TRUE))
+
+airbnbc$price <- gsub("\\$", "", airbnbc$price)
+airbnbc$price <-as.numeric(gsub(",","",airbnbc$price,fixed=TRUE))
+
+airbnbc$adjusted_price <- gsub("\\$", "", airbnbc$adjusted_price)
+airbnbc$adjusted_price <-as.numeric(gsub(",","",airbnbc$adjusted_price,fixed=TRUE))
+
+```
+
+```{r}
+typeof(airbnbl$price)
+is.numeric(airbnbl$price)
+head(airbnbl$price)
+```
+
+```{r}
+typeof(airbnbc$price)
+is.numeric(airbnbc$price)
+head(airbnbc$price)
+
+typeof(airbnbc$adjusted_price)
+is.numeric(airbnbc$adjusted_price)
+head(airbnbc$adjusted_price)
+
+```
+
+date (listings, reviews and calendar): The date was contained in yyyy-mm-dd format but as a string. It was transformed to R date format, so the date can be manipulated and Analysed later.
+
+```{r}
+airbnbl$host_since <- as.Date(airbnbl$host_since)
+is.Date(airbnbl$host_since)
+head(airbnbl$host_since)
+
+airbnbr$date <- as.Date(airbnbr$date)
+is.Date(airbnbr$date)
+head(airbnbr$date)
+
+airbnbc$date <- as.Date(airbnbc$date)
+is.Date(airbnbc$date)
+head(airbnbc$date)
+```
+
+Dealing with Missing Values
+
+Evaluate the columns that we will use in the exploratory analysis
+
+```{r}
+airbnbl %>% select(host_is_superhost,host_id,review_scores_rating,review_scores_location,host_name,host_since,price,neighbourhood_cleansed,property_type,latitude,longitude) %>% sapply(function(x){sum(is.na(x))})
+```
+
+```{r}
+colSums(is.na(airbnbr))
+```
+
+```{r}
+colSums(is.na(airbnbc))
+
+```
+
+Observations for the missing values analysis:
+
+1. (calendar) All the rows have no missing values.
+2. (listings and reviews) Most of the rows have no missing values.
+3. (listings) Review_scores_rating and review_scores_location have 1312 missing values what represents 21% of the data set. As a large fraction of observations and there is no way to fill the reviews because is a personal opinion of the customers, we are going to exclude these rows just for Spatial data analysis. 
+4. (reviews) comments has only 3 rows with missing data, there is no way to fill the comments because is a personal opinion of the customers, we are going to exclude these rows.
+
+```{r}
+airbnbr <- airbnbr %>% filter(!is.na(comments))
+colSums(is.na(airbnbr))
+
+```
+
+additionally, we remove all 2019 values from reviews
+1. Because 2019 is incomplete data.
+2. From summary(airbnbr), we see that 2019-01-17 is the max value for date 
+  
+```{r}
+airbnbr <- airbnbr %>% mutate(year = year(date)) %>% filter(year < 2019) %>% arrange(desc(year))
+
+```
+
+We remove all the 2020 values from calendar
+1. Because 2020 is incomplete data.
+2. From summary(airbnbc), we see that 2020-01-16 is the max value for date 
+
+```{r}
+airbnbc <- airbnbc %>% mutate(year = year(date))%>% mutate(month = month(date)) %>% filter(year == 2019)
+
+```
+
+
+```{r}
+summary(airbnbc)
+difprice<- (airbnbc$adjusted_price - airbnbc$price)
+unique(difprice)
+```
+
+Observations for the airbnb calendar analysis:
+
+1. There is a difference between the price and adjusted_price.
+2. Because the adjusted_price is the most updated value, we are going to use adjusted_price for the analysis.
+
+## Exploratory Data Analysis
+
+In this section, we will detail our analysis to the questions of interest mentioned in the introduction and gain preliminary insights through exploratory data analysis and visualization.
+
+### Spatial Data Analysis
+
+This section will explore review scores rating from our dataset using spatial visualizations and will answer questions relating to changing in ratings across different locations in Boston. 
+
+Airbnb users (customers) rate their stay on the basis of location, cleanliness and other parameters. Here we work with the review_scores_location data that range from 1 to 10.The location scores have to be a firm indicator of the appeal of the neighbourhood. Highly rated and concentrated neighborhoods will tend to have better connectivity (public transportation like subway stations and bus route), it will tend to be closer to the city tourist places or business locations.
+
+
+```{r}
+reviewsLocation <- airbnbl %>% drop_na(review_scores_location)
+
+library("ggmap")
+ggmap::register_google(key = "Enter your google map key here")
+reviewsPlot <- ggmap(get_googlemap(center = c(lon = -71.03558, lat = 42.3577109),
+                    zoom = 12,
+                    source = "google",
+                    maptype = 'terrain',
+                    color = 'color'))
+
+reviewsPlot+geom_point(aes(x = longitude, y = latitude, color =review_scores_location), data = reviewsLocation, size =0.5, na.rm = TRUE)+
+  scale_color_gradient(low="blue", high="red")+
+  ggtitle("Boston Airbnb Review Scores Location", subtitle = "from 2018 to 2019") + 
+  theme(plot.subtitle = element_text(color = "grey35")) + 
+          theme(plot.title = element_text(lineheight = 0.9,hjust = -5,size = 15),plot.subtitle = element_text               (hjust = 2.05,size = 10))+
+          labs(color = "Review Scores Location")+
+          xlab ("Latitude") +
+          ylab ("Longitude")
+```
+
+The graph confirms our premise that the concentration of the review locations are near of tourist places or business locations. As the Boston Common and Boston Public Garden in Beacon Hill, Boylston st in Back Bay, Old North Church and St. Stephen`s Catholic Church in North End, Faneuil Hall Marketplace and New England Aquarium in Financial District.
+
+Through visualization,we want to study the relationship between property type and neighbourhood. The primary question we aim to answer is whether different neighborhoods constitute of different rental property types. Though there are more than 17 types, we will be focussing on the top 5 by their total Listings in the city and understanding their distribution in each neighbourhood
+
+```{r}
+top5PropertyType <-  airbnbl %>% group_by(property_type) %>% summarize(Freq = n()) %>% arrange(desc(Freq))
+
+ggplot(top5PropertyType, aes(x = reorder (property_type, Freq), y = Freq))+
+  coord_flip()+
+  geom_bar(stat= "identity", fill="orange")+
+  theme_minimal()+
+  guides(fill=FALSE)+
+  scale_fill_manual(values=c("#56B4E9"))+
+  ggtitle("Property Types in Boston Airbnb",subtitle = "from 2018 to 2019") + 
+  theme(plot.subtitle = element_text(color = "grey35"))+
+          theme(plot.title = element_text(lineheight = 0.9,hjust = -0.35,size = 15), plot.subtitle = element_text           (hjust = 1,size = 10))+
+          xlab ("Property Types") +
+          ylab ("Listings")
+```
+
+The most listed properties are Apartment, House, Condominium, Serviced apartment and Townhouse.
+
+```{r}
+propertyType <- airbnbl %>% group_by(property_type,neighbourhood_cleansed) %>% filter(property_type %in% c("Apartment","House","Condominium","Serviced apartment", "Townhouse")) %>% summarize(Freq = n()) %>% arrange(desc(Freq))
+
+
+ggplot(propertyType, aes(x = reorder (neighbourhood_cleansed, Freq), y = Freq, fill =property_type))+
+  coord_flip()+
+  geom_bar(stat= "identity")+
+  theme_minimal()+
+  ggtitle("Listed Property Types by Neighbourhood",subtitle = "from 2018 to 2019") + 
+  theme(plot.subtitle = element_text(color = "grey35")) +
+          theme(plot.title = element_text(lineheight = 0.9,hjust = -50,size = 15),plot.subtitle = element_text              (hjust = 1.65,size = 10))+
+          xlab ("Neighbourhood") +
+          ylab ("Number of properties listed")+
+          labs (fill= "Property Types")
+```
+
+While analysing the plot, we wish to better understand the relevance of property types in the Roslindale, Hyde Park, West Roxbury, Mattapan and Leather District because it wasn't clear on the plot.
+
+```{r}
+percentageOfAll <- propertyType %>% group_by(neighbourhood_cleansed) %>% filter(property_type == "Townhouse")
+
+percentage <- propertyType %>% filter(neighbourhood_cleansed == "Leather District")
+frequency <- sum(percentage$Freq)
+percentage <- mutate(percentage, per= Freq/frequency)
+
+ggplot(percentage, aes(x = property_type, y = per))+
+  coord_flip()+
+  geom_bar(stat = "identity")+
+  theme_minimal()+
+  ggtitle("Property Types by Percentage for Leather District")+
+          theme(plot.title = element_text(face = "bold"))+
+          xlab ("Property Types") +
+          ylab ("Percentage")
+
+```
+
+Takeaways from the plot
+
+1. The Apartment style listings are highest in number for most of the neighborhoods except Roslindale, Hyde Park, West Roxbury, Mattapan and Leather District. 
+2. The maximum apartment style listings are located in Back Bay with 424 properties in that neighborhood  in comparison with the other neighborhoods. Next is Downtown with 390 properties followed by Fenway and South End with 348 and 340 properties respectively.
+3. Roslindale and Mattapan have a lot of House style listings than apartment, with 57 and 45 properties in thouse neighborhood and apartment style with 34 and 15 properties respectively.
+4. Condominium style listings are common in South Boston with 71 properties in that neighborhood in comparison with the other neighborhoods. Next is Jamaica Plain with 62 properties and South End with 54 properties.
+5. Serviced apartment style listings are common in Fenway with 32 properties in that neighborhood in comparison with the other neighborhoods. Next are Back Bay and West End with 25 properties each.
+6. Townhouse style listings are common in Roxbury with 42 properties in that neighborhood in comparison with the other neighborhoods. Next are Brighton, Charlestown and East Boston with 12 properties each.
+
+### Supply and Price Analysis
+
+How is Airbnb priced across the year?
+
+```{r}
+groupedCalendar <- airbnbl %>% mutate(year = year(host_since)) %>% group_by(year = year) %>% summarise(averagePrice = round(mean(price))) 
+
+
+plot1 <- ggplot(groupedCalendar, aes(x = year, y = averagePrice))+
+  geom_bar(stat= "identity",fill="#4E84C4")+
+  theme_minimal()+
+  scale_x_continuous(breaks = seq(2008, 2019, by = 1))+
+  ggtitle("Average Price per Year",subtitle = "from 2018 to 2019")+
+          theme(plot.title = element_text(lineheight = 0.9,hjust = -0.05,size = 15),plot.subtitle = element_text            (hjust = 1,size = 10))+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          ylab ("Average Price")+
+          scale_y_continuous(labels = dollar)
+plot1
+
+```
+
+Takeaways from the plot
+
+1. The average prices for all the types of properties across listings vary between $100 and $200, with prices peak on 2009,2013 and 2017.
+
+While analysing the plot, we wish to understand if there is a correlation of new listings over the years and the average price.
+
+```{r}
+newLisitings <- airbnbl %>% group_by(date = host_since) %>% count(host_id) %>% mutate(year = year(date))
+
+plot2 <- ggplot(newLisitings, aes(x = year, y = n))+
+  geom_bar(stat= "identity", fill="#FF6666")+
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2008, 2019, by = 1))+
+  ggtitle("New Listings",subtitle = "from 2018 to 2019")+
+          theme(plot.title = element_text(lineheight = 0.9,hjust = -0.05,size = 15),plot.subtitle = element_text            (hjust = 1,size = 10))+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          ylab ("Number of New Listings")
+
+
+grid.newpage()
+grid.draw(rbind(ggplotGrob(plot2), ggplotGrob(plot1), size = "last"))
+
+```
+
+From the graphs, we see the following key takeaways
+
+Analysis of supply of Airbnb listings:
+1. The supply of Airbnb in Boston rises steadily and consistently, until 2012, when the supply
+increases exponentially and peaks at 2014.
+2. From 2014 onwards the supply follows a consistent and linear-like decline.
+3. Note that the 2019 year has data only for the month of January, which explains the seemingly
+small supply.
+
+Analysis of the price of Airbnb listings:
+1. The average price of Airbnb listings generally stays within the range of $100 to $200, with the
+exceptions of several peaks, where prices rise to above $200.
+2. The peaks in price are seen at the years 2009, 2013, and 2017. There seems to be consistent
+4-year intervals between each price peak.
+
+How is Airbnb priced across the year for room types? and Is there a relationship between supply and price?
+
+Airbnb primarily provides three types of properties, “Entire homes”, “private rooms”, and “shared
+rooms”. We wish to analyse the average price per year of each type of property. Since shared rooms
+constitute less than 2% of all room types, with only 92 points of data, the data set available is too small
+to make any meaningful conclusions. Thus, we disregard the shared rooms from our analysis.
+
+```{r}
+roomTypes <-  airbnbl %>% group_by(room_type) %>% summarize(Freq = n()) %>% arrange(desc(Freq))
+
+```
+
+```{r}
+# Entire home/apt
+groupedEHA <- airbnbl %>% mutate(year = year(host_since)) %>% group_by(room_type,year = year)%>% filter(room_type == "Entire home/apt")%>% summarise(averagePrice = round(mean(price)))
+
+
+plot3 <- ggplot(groupedEHA, aes(x = year, y = averagePrice), fill = room_type)+
+  geom_bar(stat= "identity", fill="#339966")+
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2008, 2019, by = 1))+
+  ggtitle("Average Price per Year",
+  subtitle= "Entire home apartment                                                                                                   from 2008 to 2019")+
+          theme(plot.title = element_text(lineheight = 0.9,size = 15),plot.subtitle = element_text                          (hjust = 0,size = 10))+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          ylab ("Average Price")+
+          scale_y_continuous(labels = dollar)
+
+
+newLisitingsEHA <- airbnbl %>% group_by(room_type,date = host_since)  %>% filter(room_type == "Entire home/apt") %>% count(host_id) %>% mutate(year = year(date))
+
+plot5 <- ggplot(newLisitingsEHA, aes(x = year, y = n))+
+  geom_bar(stat= "identity", fill="#0C5578")+
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2008, 2019, by = 1))+
+  ggtitle("New Listings per Year",
+  subtitle= "Entire home apartment                                                                                                   from 2008 to 2019")+
+          theme(plot.title = element_text(lineheight = 0.9,size = 15),plot.subtitle = element_text                          (hjust = 0,size = 10))+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          ylab ("Number of New Listings")
+
+grid.newpage()
+grid.draw(rbind(ggplotGrob(plot5), ggplotGrob(plot3), size = "last"))
+```
+
+From the graphs, we see the following key takeaways
+
+Analysis of supply of Airbnb Entire Home Apartment type:
+1. The New Listings has the same comportment as the all listings.
+
+Analysis of the price of Airbnb Entire Home Apartment type:
+1. Similar to the average price of all listings, the average price of entire homes peaks every four years, with peaks occurring at 2009, 2013, and 2017.
+2. The range for the average price is generally between $150 and $250.
+3. The mean of the average prices across all years for Entire Home Apartment is greater than that of all Airbnb listings and that of private rooms. This means that Entire homes tend to cost more than private rooms, and bring up the price of all listings
+
+```{r}
+#Private room
+groupedPR<- airbnbl %>% mutate(year = year(host_since)) %>% group_by(room_type,year = year)%>% filter(room_type == "Private room")%>% summarise(averagePrice = round(mean(price)))
+
+
+plot4 <- ggplot(groupedPR, aes(x = year, y = averagePrice), fill = room_type)+
+  geom_bar(stat= "identity", fill="#00BFC4")+
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2008, 2019, by = 1))+
+  ggtitle("Average Price per Year",
+  subtitle= "Private room                                                                                                                from 2008 to 2019")+
+          theme(plot.title = element_text(lineheight = 0.9,size = 15),plot.subtitle = element_text                          (hjust = 0,size = 10))+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          ylab ("Average Price")+
+          scale_y_continuous(labels = dollar)
+
+newLisitingsPR <- airbnbl %>% group_by(room_type,date = host_since)  %>% filter(room_type == "Private room") %>% count(host_id) %>% mutate(year = year(date))
+
+plot6 <- ggplot(newLisitingsPR, aes(x = year, y = n))+
+  geom_bar(stat= "identity", fill="#FFB600")+
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2008, 2019, by = 1))+
+  ggtitle("New Listings per Year",
+  subtitle= "Private room                                                                                                                from 2008 to 2019")+
+          theme(plot.title = element_text(lineheight = 0.9,size = 15),plot.subtitle = element_text                          (hjust = 0,size = 10))+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          ylab ("Number of New Listings")
+
+grid.newpage()
+grid.draw(rbind(ggplotGrob(plot6), ggplotGrob(plot4), size = "last"))
+```
+
+From the graphs, we see the following key takeaways
+
+Analysis of supply of Airbnb Private room:
+1. The New Listings has a different compartment of the all listings. The peak occurs in 2015 and
+the price decrease until 2017 and increase in 2018.
+
+Analysis of the price of Airbnb Private room:
+1. Unlike the average price per year for all listings, and for Entire Home apartments, the average price per year for private rooms does not follow a trend in price peaks every 4 years.
+2. The highest peak occurred during 2009, which was Airbnb’s first year on the market.
+3. The mean of all average prices per year for private rooms is less than that of all apartments and Entire Home apartments. This means that private rooms tend to cost less than Entire homes, and bring down the average price of all listings.
+
+The average price from new bookings over the months?
+
+```{r}
+airbnbcNumByMonth <- airbnbc %>% group_by(year,month) %>% summarise(averagePrice = round(mean(adjusted_price)))
+
+ggplot(airbnbcNumByMonth, aes(x = month, y = averagePrice)) + 
+  theme_minimal() +
+  ggtitle("Boston Airbnb price for new bookings", subtitle = "for the year of 2019") + 
+  theme(plot.subtitle = element_text(color = "grey35")) + 
+  theme(plot.caption = element_text(color = "grey68"))+
+  theme(plot.title = element_text(lineheight = 0.9,size = 15),plot.subtitle = element_text                          (hjust = 1,size = 10))+
+  labs(x = "Month", y = "Average Price") +
+  geom_line(na.rm = TRUE, color = "darkgreen", alpha=0.5, size = 2)+
+  scale_x_continuous(breaks = seq(1, 12, by = 1))
+```
+
+From the graphs, we see the following key takeaway
+
+1. The average price is lower during the winter season, the price start picking up for spring season and the average price keeps high until the end of the summer season when it drops during the fall season until the end of the year.
+
+### Demand Analysis
+
+The following graph plots the date from 2009 to 2018 on the x axis, and the number of unique listings
+with reviews on the y axis. In our analysis we use the number of unique listings with reviews as an
+indication of demand, as it is implied that a reviewer has bought a listing from Airbnb.
+
+```{r}
+#airbnbrNumByYear is a data frame that shows the number of reviews in each year
+airbnbrNumByYear <- airbnbr %>% mutate(year = year(date)) %>% group_by(year) %>% summarise(numberOfReviews = n()) %>% mutate(diff = numberOfReviews - lag(numberOfReviews))
+
+ggplot(airbnbrNumByYear, aes(x = year, y = numberOfReviews)) + 
+  geom_line(na.rm = TRUE, color = "dodgerblue3", alpha=0.5, size = 2) + 
+  theme_minimal() + 
+  ggtitle("Boston Airbnb demand over the years", subtitle = "from 2009 to 2018") + 
+  theme(plot.subtitle = element_text(color = "grey35")) + 
+  theme(plot.caption = element_text(color = "grey68"))+
+  labs(x = "Year", y = "Demand (numbers of reviews)") + 
+  theme(plot.title = element_text(face = "bold",lineheight = 0.9,size = 15),plot.subtitle = element_text            (hjust = 1,size = 10)) + 
+  scale_x_continuous(breaks = seq(2008, 2018, by = 1))
+```
+
+From the graphs, we see the following key takeaways
+
+1. The graph shows a slow and linear increase between the years 2009 and 2012.
+2. From 2012 onwards, the demand for Airbnb increases dramatically.
+
+Why does the popularity of Airbnb increase dramatically from 2012 onwards?
+1. The classical explanation is demand rises when price falls. However according to previous graphs, there is no exponential decrease in price from the year 2012.
+2. Thus, the explanation could be that demand increases as the popularity of Airbnb increased through publicity and word of mouth.
+
+The following graph is similar to previous graph. except the x axis is plotted with the days of the year.
+
+```{r}
+#airbnbrNumByDay is a data frame that shows the nubmer of reviews in each day 
+airbnbrNumByDay <- airbnbr %>% mutate(year = year(date)) %>% mutate(month = month(date)) %>%  mutate(day = day(date)) %>% group_by(year, month, day) %>% summarise(numberOfReviews = n()) %>% unite("Year_Month_Day", year, month, day, sep = "-") 
+
+
+#converting the "Year_Month_Day" from characters to date format, so we can manipulate it later
+airbnbrNumByDay$Year_Month_Day = as.Date(airbnbrNumByDay$Year_Month_Day)
+
+ggplot(airbnbrNumByDay, aes(x = Year_Month_Day, y = numberOfReviews)) + 
+  geom_point(na.rm = TRUE, color = "dodgerblue3", alpha=0.5) + 
+  ggtitle("Boston Airbnb demand over the years",subtitle = "by day and from 2009 to 2018") + 
+  theme_minimal() + 
+  labs(x = "Day", y = "Demand (numbers of reviews)") + 
+  theme(plot.title = element_text(face = "bold",lineheight = 0.9,size = 15),plot.subtitle = element_text            (hjust = 1,size = 10)) + 
+  theme(plot.subtitle = element_text(color = "grey35")) + 
+  theme(plot.caption = element_text(color = "grey68"))
+
+```
+
+From the graphs, we see the following key takeaways
+1. The graph shows the same increase in demand exhibited in previous graph.
+2. Additionally, it indicates wave-like function behaviour beginning from 2014. This can be interpreted as seasonal demand, as the demand for Airbnb may rise during some months and fall during others.
+
+Creating a new data frame "totalReviewsByMonth" to see which month has the most reviews
+
+```{r}
+totalReviewsByMonth <- airbnbr %>% mutate(month = month(date)) %>%  group_by(month) %>% summarise(numberOfReviews = n())
+
+totalReviewsByMonthAndYear <- airbnbr %>% mutate(month = month(date), year = year(date)) %>%  group_by(month, year) %>% summarise(numberOfReviews = n())
+
+```
+
+```{r}
+ggplot(totalReviewsByMonth, aes(x = month, y = numberOfReviews)) + 
+  geom_line(na.rm = TRUE, color = "black", alpha=0.5, size = 2) +
+  ggtitle("Airbnb demand over the months",subtitle = "from 2009 to 2018") + 
+  labs(x = "Month", y = "Demand (numbers of reviews)") + 
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(1, 12, by = 1))+
+  theme(plot.title = element_text(face = "bold")) + 
+  theme(plot.subtitle = element_text(color = "grey35")) + 
+  theme(plot.caption = element_text(color = "grey68"))+
+  theme(plot.title = element_text(face = "bold",lineheight = 0.9,size = 15),plot.subtitle = element_text            (hjust = 1,size = 10))
+```
+
+From the graphs, we see the following key takeaways
+1. The graphs for the all years since 2014 follow the same demand trend throughout the year.
+2. The demand trend follows what it is expect for travel seasonality, with the summer holiday bringing in more demand during June and July, and large events in the city of Boston bringing in demand during September and October.
+
+###Other Interesting Insights
+
+####how is the Super Host for Airbnb distributed?
+
+Airbnb wards the title of “Super host” to a small fraction of its dependable hosts. This is designed as an incentive program that is a win-win for both the host, Airbnb, and their customers. The super host gets more business in the form of higher bookings, the customer gets improved service and Airbnb gets happy satisfied customers.
+
+```{r}
+airbnbHost <- airbnbl %>% drop_na(review_scores_rating)
+
+superHost <- airbnbHost %>% group_by(review_scores_rating,host_is_superhost,longitude,latitude) 
+
+superHost$host_is_superhost[superHost$host_is_superhost == "t"] <- "True"
+superHost$host_is_superhost[superHost$host_is_superhost == "f"] <- "False"
+
+reviewsPlot+geom_point(aes(x = longitude, y = latitude, color = host_is_superhost), data = superHost, size =0.5, na.rm = TRUE)+
+  ggtitle("Superhost distribution across Boston",subtitle = "from 2008 to 2019")+
+  scale_color_manual(values = c("#FC4E07", "#00AFBB"))+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          theme(plot.title = element_text(lineheight = 0.9,hjust = -3,size = 15),plot.subtitle = element_text               (hjust = 1.8,size = 10))+
+          labs(color = "Superhost")+
+          xlab ("Latitude") +
+          ylab ("Longitude")
+```
+
+From the graphs, we see the following key takeaway
+1. The Superhosts are spread across all the neighborhoods of Boston and not concentrated in one area.
+
+Based on the privus plot, we want to know if it is possible to stay at a Superhost with less than $100 per night.
+
+```{r}
+price100 <- superHost %>% group_by(neighbourhood_cleansed,host_is_superhost,price) %>% filter(host_is_superhost == "True") %>% filter(price < 100) %>% arrange(neighbourhood_cleansed)
+
+ggplot(price100,aes(x=price, y=neighbourhood_cleansed))+  
+  geom_point(position = "jitter",aes(color = price))+
+  theme_minimal()+
+  scale_color_gradient(low = "green", high = "red")+
+          ggtitle("Superhost < $100 per night",subtitle = "from 2008 to 2019")+
+          theme(plot.subtitle = element_text(color = "grey35")) +
+          theme(plot.title = element_text(lineheight = 0.9,hjust = -0.5,size = 15),plot.subtitle = element_text             (hjust = 1.2,size = 10))+
+          labs(color = "Price")+
+          xlab ("Price per night") +
+          ylab ("Neighbourhood")
+
+```
+
+From the graphs, we see the following key takeaways
+1. From the graph we can see that the range of prices starts at $19 per night.
+2. The prices vary by neighborhood, with the neighborhood of Dorchester having the greatest distribution. An explanation for his spread distribution in prices can be found in our analysis, plot Listed Property Types by Neighborhood, which shows that Dorchester supplies the most varied property types out of all the neighborhoods.
+3. Similarly, the plot Listed Property Types by Neighborhood. Indicates that the neighborhood of Bay back supplies a very small variety of property types, with most of them being apartments. we see that Bay back also has a very small prices distribution, with most of the price being in the upper range.
+
+CONCLUSIONS
+
+Spatial data analysis:
+
+- How location ratings change across the neighborhoods?
+The concentration of the review locations is near tourist areas and business locations. As the Boston Common and Boston Public Garden in Beacon Hill, Boylston St in Back Bay, Old North Church and St. Stephen`s Catholic Church in North End, Faneuil Hall Marketplace and New England Aquarium in Financial District.
+- how is the Super Host distributed across the neighborhoods?
+The super hosts are spread across all the neighborhoods of Boston and not concentrated in one area.
+
+Price and supply analysis:
+
+- What is the average price of Airbnb per year, and across all the years available?
+The average price of Airbnb listings generally stays within the range of $100 to $200, with the exceptions of peaks in 2009,2013 and 2017, where prices rise to above $200.
+- Is there a relationship between supply and price?
+I couldn't find any data that supports correlation between supply and price.
+- Similarly, is there a relationship considering the different room types available?
+I couldn't find any data that supports correlation between supply and price considering the different room types available. 
+I find that the range for the average price for Entire Home Apartment is greater than that of all Airbnb listings and that of private rooms. And unlike the average price per year for all listings, and for Entire Home apartments, the average price per year for private rooms does not follow a trend in price peaks every 4 years.
+- The average price from new bookings over the months?
+The average price is lower during the winter season, the price start picking up for spring season and the average price keeps high until the end of the summer season when it drops during the fall season until the end of the year.
+- Is it possible to stay at a Super host for under $100 per night?
+It is possible to stay in most of neighbourhood in a Super Host with prices starting at $19 per night.
+
+Demand analysis:
+
+- What is the total demand for Airbnb per year, and across all the years available?
+There is a linear increase in demand between the years 2009 and 2012 and after that the demand for Airbnb increases dramatically.
+- Is there a relationship between supply, price, and demand?
+I couldn't find any data that supports correlation between supply, price and demand.
+- Are there any trends in the demand for Airbnb?
+The demand trend follows what I expect for travel seasonality, with the summer holiday bringing in more demand during June and July, and large events in the city of Boston bringing in demand during September and October.
